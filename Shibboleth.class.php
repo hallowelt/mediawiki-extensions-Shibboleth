@@ -1,6 +1,7 @@
 <?php
 
 use \MediaWiki\Auth\AuthManager;
+use MediaWiki\Extension\Shibboleth\IUserInfoProvider;
 
 /**
  * Description of Shibboleth auth class
@@ -20,11 +21,12 @@ class Shibboleth extends PluggableAuth {
      * @return boolean
      */
     public function authenticate(&$id, &$username, &$realname, &$email, &$errorMessage) {
+		$userinfoprovider = $this->makeUserInforProvider();
 
         $id = null;
-        $username = $this->getUsername();
-        $realname = $this->getDisplayName();
-        $email = $this->getEmail();
+        $username = $userinfoprovider->getUsername();
+        $realname = $userinfoprovider->getRealname();
+        $email = $userinfoprovider->getEmail();
 
         if (isset($GLOBALS['wgShibboleth_GroupMap'])) {
             $this->checkGroupMap();
@@ -85,84 +87,6 @@ class Shibboleth extends PluggableAuth {
         }
     }
 
-    /**
-     * Display name from Shibboleth
-     *
-     * @return string
-     * @throws Exception
-     */
-    private function getDisplayName() {
-
-        // wgShibboleth_DisplayName check in LocalSettings.php
-        if (empty($GLOBALS['wgShibboleth_DisplayName'])) {
-            throw new Exception(wfMessage('wg-empty-displayname')->plain());
-        } else {
-            $displayName = $GLOBALS['wgShibboleth_DisplayName'];
-        }
-
-        // Real name Shibboleth attribute check
-        if (empty(filter_input(INPUT_SERVER, $displayName))) {
-            throw new Exception(wfMessage('shib-attr-empty-realname')->plain());
-        } else {
-            return filter_input(INPUT_SERVER, $displayName);
-        }
-    }
-
-    /**
-     * Email address from Shibboleth
-     *
-     * @return string
-     * @throws Exception
-     */
-    private function getEmail() {
-
-        // wgShibboleth_Email check in LocalSettings.php
-        if (empty($GLOBALS['wgShibboleth_Email'])) {
-            throw new Exception(wfMessage('wg-empty-email')->plain());
-        } else {
-            $mail = $GLOBALS['wgShibboleth_Email'];
-        }
-
-        // E-mail shibboleth attribute check
-        if (empty(filter_input(INPUT_SERVER, $mail))) {
-            throw new Exception(wfMessage('shib-attr-empty-email')->plain());
-        } else {
-            return filter_input(INPUT_SERVER, $mail);
-        }
-    }
-
-    /**
-     * Username from Shibboleth
-     *
-     * @return string
-     * @throws Exception
-     */
-    private function getUsername() {
-
-        // wgShibboleth_Username check in LocalSettings.php
-        if (empty($GLOBALS['wgShibboleth_Username'])) {
-            throw new Exception(wfMessage('wg-empty-username')->plain());
-        } else {
-            $user = $GLOBALS['wgShibboleth_Username'];
-        }
-
-        // Username shibboleth attribute check
-        if (empty(filter_input(INPUT_SERVER, $user))) {
-            throw new Exception(wfMessage('shib-attr-empty-username')->plain());
-        } else {
-
-            $username = filter_input(INPUT_SERVER, $user);
-
-            // If $username contains '@' replace it with '(AT)'
-            if (strpos($username, '@') !== false) {
-                $username = str_replace('@', '(AT)', $username);
-            }
-
-            // Uppercase the first letter of $username
-            return ucfirst($username);
-        }
-    }
-
     private function checkGroupMap() {
 
         $attr_name = $GLOBALS['wgShibboleth_GroupMap']['attr_name'];
@@ -199,5 +123,31 @@ class Shibboleth extends PluggableAuth {
 
         return $logout_url;
     }
+
+	/**
+	 * @return IUserInfoProvider
+	 */
+	private function makeUserInforProvider() {
+		$config = new GlobalVarConfig( 'Shibboleth_' );
+		$legacyConfig = new GlobalVarConfig( 'Shib' );
+
+		$multiConfig = new MultiConfig( [
+			$config,
+			$legacyConfig
+		] );
+
+		$factoryCallback = $config->get( 'UserProviderFactoryCallback' );
+		if( !is_callable( $factoryCallback ) ) {
+			throw new MWException( "Factory for UserInfoProvider not callable!" );
+		}
+
+		$userInfoProvider = call_user_func_array( $factoryCallback, [ $multiConfig ] );
+		if( $userInfoProvider instanceof IUserInfoProvider ) {
+			throw new MWException( "Factory for UserInfoProvider did not return a valid"
+					. " IUserInfoProvider object!" );
+		}
+
+		return $userInfoProvider;
+	}
 
 }
